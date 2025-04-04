@@ -13,7 +13,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
 
 # Google Drive file ID
 FILE_ID = "1uQGu9Prwp9hvSIKZTR5S8E7gRLrKKz1-"
