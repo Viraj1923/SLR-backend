@@ -18,11 +18,12 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://slr-frontenddd.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Google Drive file ID and model path
 FILE_ID = "1uQGu9Prwp9hvSIKZTR5S8E7gRLrKKz1-"
