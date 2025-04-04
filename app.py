@@ -1,22 +1,30 @@
 import os
 import warnings
-from flask_cors import CORS
-from flask import Flask, jsonify, request
-import gdown
-import cv2
-import numpy as np
 import base64
+import numpy as np
+import cv2
+import gdown
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from tensorflow.keras.models import load_model
 
 # Suppress warnings and TensorFlow logs
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 warnings.filterwarnings("ignore")
 
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+app = FastAPI()
 
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Google Drive file ID
+# Google Drive file ID and model path
 FILE_ID = "1uQGu9Prwp9hvSIKZTR5S8E7gRLrKKz1-"
 MODEL_PATH = "keras_model.h5"
 
@@ -32,42 +40,32 @@ def download_model():
 download_model()
 model = load_model(MODEL_PATH)
 
-# Define gesture classes
-gesture_classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You', 
-                   'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You', 
+# Gesture class labels
+gesture_classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
+                   'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
                    'U', 'V', 'W', 'X', 'Y']
 
-@app.route('/')
+# Request model class
+class ImageData(BaseModel):
+    image: str
+
+@app.get("/")
 def home():
-    return jsonify({"message": "Backend is running!"})
+    return {"message": "Backend is running!"}
 
-@app.route('/predict', methods=['POST'])
-def predict():
+@app.post("/predict")
+def predict(data: ImageData):
     try:
-        data = request.get_json()
-        image_data = data.get("image")  # Expecting a base64 encoded image
-
-        if not image_data:
-            return jsonify({"error": "No image provided"}), 400
-
-        # Decode base64 image
-        image_bytes = base64.b64decode(image_data)
+        image_bytes = base64.b64decode(data.image)
         np_arr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)  # Load as RGB
-        img = cv2.resize(img, (224,224))               # Resize               # Expecting 3 channels
-        img = img / 255.0 
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        img = cv2.resize(img, (224, 224))
+        img = img / 255.0
         img = img.reshape(1, 224, 224, 3)
 
-
-        # Predict
         prediction = model.predict(img)
         predicted_class = gesture_classes[np.argmax(prediction)]
 
-        return jsonify({"label": predicted_class})
-
+        return {"label": predicted_class}
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+        raise HTTPException(status_code=500, detail=str(e))
