@@ -53,9 +53,9 @@ def predict():
         image_bytes = base64.b64decode(image_data)
         np_arr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)  # Load as RGB
-        img = cv2.resize(img, (64, 64))               # Resize
-        img = img.reshape(1, 64, 64, 3)               # Expecting 3 channels
-        img = img / 255.0                             # Normalize
+        img = cv2.resize(img, (64, 64))               # Resize               # Expecting 3 channels
+        img = img / 255.0 
+        img = img.reshape(1, -1)
 
 
         # Predict
