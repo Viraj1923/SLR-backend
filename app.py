@@ -1,8 +1,8 @@
 import os
 import warnings
-import requests
 from flask_cors import CORS
 from flask import Flask, jsonify
+import gdown
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 warnings.filterwarnings("ignore")
@@ -13,39 +13,19 @@ import numpy as np
 app = Flask(__name__)
 CORS(app)
 
-# Google Drive file ID (extracted from shareable link)
+# Google Drive file ID (not full link)
 FILE_ID = "1uQGu9Prwp9hvSIKZTR5S8E7gRLrKKz1-"
 MODEL_PATH = "keras_model.h5"
 
-def download_file_from_google_drive(file_id, destination):
-    """Download a large file from Google Drive with confirmation token."""
-    def get_confirm_token(response):
-        for key, value in response.cookies.items():
-            if key.startswith('download_warning'):
-                return value
-        return None
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        print("Downloading model...")
+        url = f"https://drive.google.com/uc?id={FILE_ID}"
+        gdown.download(url, MODEL_PATH, quiet=False)
+        print("Model downloaded.")
 
-    URL = "https://docs.google.com/uc?export=download"
-    session = requests.Session()
-
-    response = session.get(URL, params={'id': file_id}, stream=True)
-    token = get_confirm_token(response)
-
-    if token:
-        params = {'id': file_id, 'confirm': token}
-        response = session.get(URL, params=params, stream=True)
-
-    with open(destination, 'wb') as f:
-        for chunk in response.iter_content(32768):
-            if chunk:
-                f.write(chunk)
-
-# Download model only if not already present
-if not os.path.exists(MODEL_PATH):
-    print("Downloading model...")
-    download_file_from_google_drive(FILE_ID, MODEL_PATH)
-
-# Load the model
+# Download and load model
+download_model()
 model = load_model(MODEL_PATH)
 
 gesture_classes = ['A', 'B', 'C', 'D','E','F','G','H', 'Hello' ,'I', 'I Love You' ,'J','K','L','M','N','O','P','Q','R','S','T', 'Thank You','U','V','W','X','Y']
