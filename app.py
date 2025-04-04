@@ -60,7 +60,11 @@ def predict(data: ImageData):
         image_bytes = base64.b64decode(data.image)
         np_arr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(status_code=400, detail="Failed to decode image. Check base64 format.")
+
         img = cv2.resize(img, (224, 224))
+
         img = img / 255.0
         img = img.reshape(1, 224, 224, 3)
 
