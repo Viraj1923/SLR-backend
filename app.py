@@ -52,12 +52,11 @@ def predict():
         # Decode base64 image
         image_bytes = base64.b64decode(image_data)
         np_arr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_GRAYSCALE)  # Convert to grayscale
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)  # Load as RGB
+        img = cv2.resize(img, (64, 64))               # Resize
+        img = img.reshape(1, 64, 64, 3)               # Expecting 3 channels
+        img = img / 255.0                             # Normalize
 
-        # Resize image to match model input
-        img = cv2.resize(img, (64, 64))  # Adjust size as per your model input shape
-        img = img.reshape(1, 64, 64, 1)  # Add batch dimension
-        img = img / 255.0  # Normalize
 
         # Predict
         prediction = model.predict(img)
