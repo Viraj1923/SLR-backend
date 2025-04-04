@@ -18,7 +18,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://slr-frontenddd.vercel.app"],
+    allow_origins=["*"],  # Allow all for testing
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
