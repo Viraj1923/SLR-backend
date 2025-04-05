@@ -59,9 +59,10 @@ def predict(data: ImageData):
             raise HTTPException(status_code=400, detail="Invalid image data.")
 
         # Preprocessing
-        img = cv2.resize(img, (224, 224))
+        img = cv2.resize(img, (96, 96))
         img = img / 255.0
-        img = img.reshape(1, 224, 224, 3)
+        img = img.reshape(1, 96, 96, 3)
+
 
         # Prediction
         prediction = model.predict(img)
