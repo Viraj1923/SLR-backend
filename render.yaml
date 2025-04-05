@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: fingertalk-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app -k uvicorn.workers.UvicornWorker --workers=1 --timeout 90 --preload
+    plan: free
