@@ -81,7 +81,14 @@ def predict(data: ImageData):
 
         # Predict
         prediction = model.predict(img)
-        predicted_class = gesture_classes[np.argmax(prediction)]
+        print("Raw prediction:", prediction)
+        
+        predicted_index = np.argmax(prediction)
+        predicted_class = gesture_classes[predicted_index]
+        
+        print("Predicted index:", predicted_index)
+        print("Predicted class:", predicted_class)
+
 
         return {"label": predicted_class}
 
