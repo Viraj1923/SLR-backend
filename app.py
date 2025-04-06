@@ -44,6 +44,7 @@ def root():
 
 @app.post("/predict")
 def predict(data: ImageData):
+    print("✅ /predict called")
     try:
         # Decode base64 image
         image_bytes = base64.b64decode(data.image.split(',')[-1])
@@ -58,7 +59,8 @@ def predict(data: ImageData):
         results = hands.process(rgb_img)
 
         if not results.multi_hand_landmarks:
-            raise HTTPException(status_code=400, detail="No hand detected")
+            return {"label": "-"}
+
 
         # Get bounding box
         h, w, _ = img.shape
