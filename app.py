@@ -1,14 +1,14 @@
 import base64
 import numpy as np
-from fastapi import FastAPI
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-import tensorflow as tf
 import cv2
+import tensorflow as tf
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI()
 
-# Allow CORS from frontend
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,65 +17,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Request model
+# Load TFLite model
+TFLITE_MODEL_PATH = "sign_language_model.tflite"
+interpreter = tf.lite.Interpreter(model_path=TFLITE_MODEL_PATH)
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Label classes
+gesture_classes = ['A', 'B', 'C', 'D','E','F','G','H', 'Hello' ,'I', 'I Love You' ,'J','K','L','M','N','O','P','Q','R','S','T', 'Thank You','U','V','W','X','Y']
+
+# Input schema
 class ImageData(BaseModel):
-    image: str
-
-# Model path and label mapping
-MODEL_PATH = "sign_language_light_model.h5"
-gesture_classes = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-    'Hello', 'I', 'I Love You', 'J', 'K', 'L', 'M',
-    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
-    'U', 'V', 'W', 'X', 'Y'
-]
-
-# Load model once at startup
-model = None
-
-@app.on_event("startup")
-def load_model_on_startup():
-    global model
-    try:
-        model = tf.keras.models.load_model(MODEL_PATH)
-        print("✅ Model loaded successfully.")
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
+    image: str  # Base64 encoded image
 
 @app.post("/predict")
-async def predict_image(data: ImageData):
+async def predict(data: ImageData):
     try:
-        # Decode base64 image
+        # Decode base64 string
         base64_str = data.image.split(',')[-1]
-        img_bytes = base64.b64decode(base64_str)
-        img_array = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        image_bytes = base64.b64decode(base64_str)
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
         if img is None:
-            raise ValueError("Failed to decode image!")
+            raise HTTPException(status_code=400, detail="Invalid image")
 
-        # Resize and preprocess image
+        # Preprocess
         img = cv2.resize(img, (96, 96))
-        img = img / 255.0
+        img = img.astype('float32') / 255.0
         img = np.expand_dims(img, axis=0)
 
-        print("🔍 Image shape for prediction:", img.shape)
+        # Set tensor and run inference
+        interpreter.set_tensor(input_details[0]['index'], img)
+        interpreter.invoke()
+        output = interpreter.get_tensor(output_details[0]['index'])
+        predicted_index = int(np.argmax(output))
+        predicted_label = gesture_classes[predicted_index]
 
-        # Predict
-        prediction = model.predict(img)
-        predicted_label = np.argmax(prediction[0])
-        label = gesture_classes[predicted_label]
-        print(f"✅ Prediction successful: {label}")
-
-        return {
-            "prediction": int(predicted_label),
-            "label": label
-        }
+        return {"label": predicted_label}
 
     except Exception as e:
-        print(f"❌ Prediction error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 
 @app.get("/")
 def root():
-    return {"message": "🚀 FastAPI backend for FingerTalk is running!"}
+    return {"message": "🚀 FastAPI with TFLite is running!"}
