@@ -1,4 +1,5 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import warnings
 import base64
 import numpy as np
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 from tensorflow.keras.models import load_model
 
 # Suppress TensorFlow and warnings
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 warnings.filterwarnings("ignore")
 
