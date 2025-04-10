@@ -66,6 +66,8 @@ async def predict_image(data: ImageData):
         predicted_label = np.argmax(prediction[0])
         label = gesture_classes[predicted_label]
         print(f"✅ Prediction successful: {label}")
+        print("🧠 Raw prediction:", prediction[0])
+
 
         return {
             "prediction": int(predicted_label),
