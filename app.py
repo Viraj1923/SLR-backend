@@ -67,6 +67,7 @@ async def predict_image(data: ImageData):
         label = gesture_classes[predicted_label]
         print(f"✅ Prediction successful: {label}")
         print("🧠 Raw prediction:", prediction[0])
+        print("🧠 Label from list:", gesture_classes[predicted_label])
 
 
         return {
