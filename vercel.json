@@ -1,17 +1,17 @@
 {
+  "version": 2,
   "builds": [
     {
       "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "includeFiles": ["sign_language_model.tflite"]
-      }
+      "use": "@vercel/python"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/predict",
+      "methods": ["POST"],
       "dest": "app.py"
     }
-  ]
+  ],
+  "includeFiles": ["sign_language_model.tflite"]
 }
