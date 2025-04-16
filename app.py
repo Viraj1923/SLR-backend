@@ -1,84 +1,90 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import base64
+import tensorflow as tf
 import numpy as np
 import cv2
+import base64
+import gdown
+import os
 from io import BytesIO
 from PIL import Image
-import tensorflow as tf
 import mediapipe as mp
 
-# Initialize FastAPI app
+# === CONFIGURATION ===
+MODEL_PATH = "model.tflite"
+DRIVE_FILE_ID = "1a2B3cD4eFghi5678JKlMnopQrsT"  # Replace this with your file ID
+LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
+          'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
+          'U', 'V', 'W', 'X', 'Y']
+
+# === DOWNLOAD MODEL FROM DRIVE ===
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        url = f"https://drive.google.com/uc?id={DRIVE_FILE_ID}"
+        gdown.download(url, MODEL_PATH, quiet=False)
+        print("✅ Model downloaded from Google Drive.")
+
+# === INITIALIZE ===
+download_model()
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(static_image_mode=True)
+
 app = FastAPI()
 
-# CORS (optional but needed for frontend integration)
+# === CORS SETUP ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or set to your frontend URL
+    allow_origins=["*"],  # or specify frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load TFLite model
-interpreter = tf.lite.Interpreter(model_path="model.tflite")
-interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+# === REQUEST SCHEMA ===
+class ImageData(BaseModel):
+    image: str  # base64 encoded image
 
-# Labels
-labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
-          'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You', 'U', 'V', 'W', 'X', 'Y']
-
-# Input size (get from model)
-input_shape = input_details[0]['shape']  # Usually (1, 224, 224, 3)
-input_size = input_shape[1]  # 224 or whatever your model expects
-
-
-# Request model
-class ImageRequest(BaseModel):
-    image: str
-
-
-# Utility: Decode base64, preprocess image using MediaPipe (if needed)
-def preprocess_base64_image(image_base64):
-    # Decode image
-    image_data = base64.b64decode(image_base64.split(',')[-1])
+# === HELPER FUNCTIONS ===
+def preprocess_image(base64_str):
+    image_data = base64.b64decode(base64_str)
     image = Image.open(BytesIO(image_data)).convert("RGB")
-    image = np.array(image)
+    img_np = np.array(image)
 
-    # Optionally use MediaPipe to crop hand region
-    mp_hands = mp.solutions.hands
-    with mp_hands.Hands(static_image_mode=True, max_num_hands=1) as hands:
-        results = hands.process(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-        if results.multi_hand_landmarks:
-            hand_landmarks = results.multi_hand_landmarks[0]
-            h, w, _ = image.shape
-            x_coords = [int(landmark.x * w) for landmark in hand_landmarks.landmark]
-            y_coords = [int(landmark.y * h) for landmark in hand_landmarks.landmark]
-            x_min, x_max = max(min(x_coords) - 20, 0), min(max(x_coords) + 20, w)
-            y_min, y_max = max(min(y_coords) - 20, 0), min(max(y_coords) + 20, h)
-            image = image[y_min:y_max, x_min:x_max]
+    # Detect hand and crop
+    results = hands.process(cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
+    if results.multi_hand_landmarks:
+        h, w, _ = img_np.shape
+        hand = results.multi_hand_landmarks[0]
+        x_coords = [lm.x * w for lm in hand.landmark]
+        y_coords = [lm.y * h for lm in hand.landmark]
+        x1, y1 = int(max(min(x_coords) - 20, 0)), int(max(min(y_coords) - 20, 0))
+        x2, y2 = int(min(max(x_coords) + 20, w)), int(min(max(y_coords) + 20, h))
+        img_np = img_np[y1:y2, x1:x2]
 
-    # Resize to input size and normalize
-    image = cv2.resize(image, (input_size, input_size))
-    image = image.astype(np.float32) / 255.0
-    image = np.expand_dims(image, axis=0)
+    # Resize and normalize
+    resized = cv2.resize(img_np, (224, 224))  # change to your model's input size
+    normalized = resized.astype("float32") / 255.0
+    return np.expand_dims(normalized, axis=0)
 
-    return image
-
-
-# Route: POST /predict
-@app.post("/predict")
-def predict(data: ImageRequest):
-    image = preprocess_base64_image(data.image)
-
-    interpreter.set_tensor(input_details[0]['index'], image)
+def predict(image_np):
+    interpreter.set_tensor(input_details[0]['index'], image_np)
     interpreter.invoke()
     output_data = interpreter.get_tensor(output_details[0]['index'])
+    pred_index = np.argmax(output_data)
+    return LABELS[pred_index]
 
-    predicted_index = int(np.argmax(output_data[0]))
-    predicted_label = labels[predicted_index]
-
-    return {"label": predicted_label}
+# === PREDICT ENDPOINT ===
+@app.post("/predict")
+async def predict_letter(data: ImageData):
+    try:
+        image_np = preprocess_image(data.image)
+        letter = predict(image_np)
+        return {"prediction": letter}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
