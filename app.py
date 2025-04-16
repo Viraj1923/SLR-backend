@@ -1,105 +1,96 @@
-import base64
-import numpy as np
-from fastapi import FastAPI
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-import tensorflow as tf
+# main.py
 import cv2
+import numpy as np
 import mediapipe as mp
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from tensorflow.keras.models import load_model
+import os
+from starlette.background import BackgroundTask
 
+# Configuration
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+IMAGE_SIZE = 224
+MODEL_PATH = 'Model/sign_language_model.h5'
+
+# Load model and labels
+model = load_model(MODEL_PATH)
+gesture_classes = ['A', 'B', 'C', 'D','E','F','G','H', 'Hello' ,'I', 'I Love You' ,'K','L','M','N','O','P','Q','R','S','T', 'Thank You','U','V','W','X','Y']
+label_dict = {idx: name for idx, name in enumerate(gesture_classes)}
+
+# MediaPipe setup
+mp_hands = mp.solutions.hands
+hands_detector = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.8)
+mp_drawing = mp.solutions.drawing_utils
+
+# Globals
+detected_label = ""
+cap = cv2.VideoCapture(0)
+
+# FastAPI app
 app = FastAPI()
 
-# Allow CORS from frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # You can restrict this
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Request model
-class ImageData(BaseModel):
-    image: str
+@app.get("/video_feed")
+def video_feed():
+    def generate():
+        global detected_label
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                continue
 
-# Model and labels
-MODEL_PATH = "sign_language_light_model.h5"
-gesture_classes = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-    'Hello', 'I', 'I Love You', 'J', 'K', 'L', 'M',
-    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
-    'U', 'V', 'W', 'X', 'Y'
-]
+            frame = cv2.flip(frame, 1)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = hands_detector.process(rgb)
 
-model = None
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=True, min_detection_confidence=0.8)
-mp_drawing = mp.solutions.drawing_utils
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-@app.on_event("startup")
-def load_model_on_startup():
-    global model
-    try:
-        model = tf.keras.models.load_model(MODEL_PATH)
-        print("✅ Model loaded successfully.")
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
+                    h, w, _ = frame.shape
+                    x_min, y_min, x_max, y_max = w, h, 0, 0
 
-@app.post("/predict")
-async def predict_image(data: ImageData):
-    try:
-        # Decode base64 image
-        base64_str = data.image.split(',')[-1]
-        img_bytes = base64.b64decode(base64_str)
-        img_array = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        img = cv2.flip(img, 1)
+                    for lm in hand_landmarks.landmark:
+                        x, y = int(lm.x * w), int(lm.y * h)
+                        x_min, y_min = min(x_min, x), min(y_min, y)
+                        x_max, y_max = max(x_max, x), max(y_max, y)
 
-        if img is None:
-            raise ValueError("Failed to decode image!")
+                    padding = 20
+                    x_min, y_min = max(0, x_min - padding), max(0, y_min - padding)
+                    x_max, y_max = min(w, x_max + padding), min(h, y_max + padding)
 
-        # Detect hand using MediaPipe
-        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb_img)
+                    hand_img = frame[y_min:y_max, x_min:x_max]
+                    if hand_img.size == 0:
+                        continue
 
-        if results.multi_hand_landmarks:
-            for landmarks in results.multi_hand_landmarks:
-                x_min, y_min = img.shape[1], img.shape[0]
-                x_max, y_max = 0, 0
-                for landmark in landmarks.landmark:
-                    x, y = int(landmark.x * img.shape[1]), int(landmark.y * img.shape[0])
-                    x_min, y_min = min(x_min, x), min(y_min, y)
-                    x_max, y_max = max(x_max, x), max(y_max, y)
+                    hand_img = cv2.resize(hand_img, (IMAGE_SIZE, IMAGE_SIZE))
+                    hand_img = hand_img.astype("float32") / 255.0
+                    hand_img = np.expand_dims(hand_img, axis=0)
 
-                # Crop hand with padding
-                padding = 20
-                x_min, y_min = max(0, x_min - padding), max(0, y_min - padding)
-                x_max, y_max = min(img.shape[1], x_max + padding), min(img.shape[0], y_max + padding)
+                    predictions = model.predict(hand_img, verbose=0)
+                    predicted_index = (np.argmax(predictions) - 1) % len(gesture_classes)
+                    detected_label = label_dict.get(predicted_index, "Unknown")
 
-                hand_img = img[y_min:y_max, x_min:x_max]
-                if hand_img.size == 0:
-                    raise ValueError("Invalid cropped hand image")
+                    cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+                    cv2.putText(frame, detected_label, (x_min, y_min - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-                hand_img = cv2.resize(hand_img, (96, 96))
-                hand_img = hand_img / 255.0
-                hand_img = np.expand_dims(hand_img, axis=0)
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n\r\n')
 
-                prediction = model.predict(hand_img)
-                predicted_label = np.argmax(prediction[0])
-                label = gesture_classes[predicted_label]
-                print(f"✅ Prediction: {label}")
+    return StreamingResponse(generate(), media_type='multipart/x-mixed-replace; boundary=frame')
 
-                return {
-                    "prediction": int(predicted_label),
-                    "label": label
-                }
-
-        raise ValueError("No hands detected in the image.")
-
-    except Exception as e:
-        print(f"❌ Prediction error: {e}")
-        return {"error": str(e)}
-
-@app.get("/")
-def root():
-    return {"message": "🚀 FastAPI backend for FingerTalk is running!"}
+@app.get("/get_label")
+def get_label():
+    return JSONResponse(content={"label": detected_label if detected_label else "No Detection"})
