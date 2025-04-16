@@ -6,13 +6,13 @@ import mediapipe as mp
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from tensorflow.keras.models import load_model
+import tensorflow as tf
 from starlette.background import BackgroundTask
 
 # Constants
 IMAGE_SIZE = 224
-MODEL_PATH = "sign_language_model.h5"
-GDRIVE_FILE_ID = "1L0pN3R6ldTO_2h2XNZ4HVxE2YzZ2w_2u"  # 🔁 Replace with your file ID
+MODEL_PATH = "model.tflite"  # Updated to the TFLite model path
+GDRIVE_FILE_ID = "1MuNjBliVKTLiDwux2MVdUrYsTyeSY596"  # 🔁 Replace with your file ID
 GDRIVE_URL = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
 
 # Download model if not present
@@ -26,9 +26,10 @@ gesture_classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love
                    'U', 'V', 'W', 'X', 'Y']
 label_dict = {idx: name for idx, name in enumerate(gesture_classes)}
 
-# Load model
-print("[INFO] Loading model...")
-model = load_model(MODEL_PATH)
+# Load TFLite model
+print("[INFO] Loading TFLite model...")
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
 
 # MediaPipe setup
 mp_hands = mp.solutions.hands
@@ -50,6 +51,12 @@ app.add_middleware(
 # Camera capture
 cap = cv2.VideoCapture(0)
 detected_label = "No Detection"
+
+# Preprocess input for TFLite model
+def preprocess_image(image):
+    image = cv2.resize(image, (IMAGE_SIZE, IMAGE_SIZE))
+    image = image.astype("float32") / 255.0
+    return np.expand_dims(image, axis=0)
 
 def generate_frames():
     global detected_label
@@ -82,12 +89,20 @@ def generate_frames():
                 if hand_img.size == 0:
                     continue
 
-                hand_img = cv2.resize(hand_img, (IMAGE_SIZE, IMAGE_SIZE))
-                hand_img = hand_img.astype("float32") / 255.0
-                hand_img = np.expand_dims(hand_img, axis=0)
+                hand_img = preprocess_image(hand_img)
 
-                predictions = model.predict(hand_img, verbose=0)
-                predicted_index = (np.argmax(predictions) - 1) % len(gesture_classes)
+                # Set input tensor
+                input_details = interpreter.get_input_details()
+                interpreter.set_tensor(input_details[0]['index'], hand_img)
+
+                # Run inference
+                interpreter.invoke()
+
+                # Get output tensor
+                output_details = interpreter.get_output_details()
+                predictions = interpreter.get_tensor(output_details[0]['index'])
+
+                predicted_index = np.argmax(predictions)
                 detected_label = label_dict.get(predicted_index, "Unknown")
 
                 cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
