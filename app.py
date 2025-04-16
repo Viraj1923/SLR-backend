@@ -13,7 +13,7 @@ import mediapipe as mp
 
 # === CONFIGURATION ===
 MODEL_PATH = "model.tflite"
-DRIVE_FILE_ID = "1a2B3cD4eFghi5678JKlMnopQrsT"  # Replace this with your file ID
+DRIVE_FILE_ID = "1MuNjBliVKTLiDwux2MVdUrYsTyeSY596"  # Replace this with your file ID
 LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
           'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
           'U', 'V', 'W', 'X', 'Y']
