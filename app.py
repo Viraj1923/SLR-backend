@@ -70,9 +70,11 @@ def preprocess_image(base64_str):
         x1, y1 = int(max(min(x_coords) - 20, 0)), int(max(min(y_coords) - 20, 0))
         x2, y2 = int(min(max(x_coords) + 20, w)), int(min(max(y_coords) + 20, h))
         img_np = img_np[y1:y2, x1:x2]
+    else:
+        raise ValueError("No hand detected in the image.")
 
     # Resize and normalize
-    resized = cv2.resize(img_np, (224, 224))  # change to your model's input size
+    resized = cv2.resize(img_np, (224, 224))  # Match your model's input
     normalized = resized.astype("float32") / 255.0
     return np.expand_dims(normalized, axis=0)
 
