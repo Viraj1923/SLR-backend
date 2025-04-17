@@ -13,7 +13,7 @@ import mediapipe as mp
 
 # === CONFIGURATION ===
 MODEL_PATH = "model.tflite"
-DRIVE_FILE_ID = "1MuNjBliVKTLiDwux2MVdUrYsTyeSY596"  # Replace this with your file ID
+DRIVE_FILE_ID = "1MuNjBliVKTLiDwux2MVdUrYsTyeSY596"  # Replace with your own file ID
 LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
           'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
           'U', 'V', 'W', 'X', 'Y']
@@ -40,7 +40,7 @@ app = FastAPI()
 # === CORS SETUP ===
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or specify frontend URL
+    allow_origins=["*"],  # Or use ["http://localhost:3000"] for dev
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,7 +52,6 @@ class ImageData(BaseModel):
 
 # === HELPER FUNCTIONS ===
 def preprocess_image(base64_str):
-    # ✅ Strip header if present
     if base64_str.startswith("data:image"):
         base64_str = base64_str.split(",")[1]
 
@@ -60,7 +59,6 @@ def preprocess_image(base64_str):
     image = Image.open(BytesIO(image_data)).convert("RGB")
     img_np = np.array(image)
 
-    # Detect hand and crop
     results = hands.process(cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
     if results.multi_hand_landmarks:
         h, w, _ = img_np.shape
@@ -71,13 +69,11 @@ def preprocess_image(base64_str):
         x2, y2 = int(min(max(x_coords) + 20, w)), int(min(max(y_coords) + 20, h))
         img_np = img_np[y1:y2, x1:x2]
     else:
-        raise ValueError("No hand detected in the image.")
+        return None  # No hand detected
 
-    # Resize and normalize
-    resized = cv2.resize(img_np, (224, 224))  # Match your model's input
+    resized = cv2.resize(img_np, (224, 224))  # change to (96, 96) if needed
     normalized = resized.astype("float32") / 255.0
     return np.expand_dims(normalized, axis=0)
-
 
 def predict(image_np):
     interpreter.set_tensor(input_details[0]['index'], image_np)
@@ -91,7 +87,11 @@ def predict(image_np):
 async def predict_letter(data: ImageData):
     try:
         image_np = preprocess_image(data.image)
+        if image_np is None:
+            return {"prediction": None, "message": "No hand detected in the image."}
+
         letter = predict(image_np)
-        return {"prediction": letter}
+        return {"prediction": letter, "message": "Prediction successful."}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
