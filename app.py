@@ -52,6 +52,10 @@ class ImageData(BaseModel):
 
 # === HELPER FUNCTIONS ===
 def preprocess_image(base64_str):
+    # ✅ Strip header if present
+    if base64_str.startswith("data:image"):
+        base64_str = base64_str.split(",")[1]
+
     image_data = base64.b64decode(base64_str)
     image = Image.open(BytesIO(image_data)).convert("RGB")
     img_np = np.array(image)
@@ -71,6 +75,7 @@ def preprocess_image(base64_str):
     resized = cv2.resize(img_np, (224, 224))  # change to your model's input size
     normalized = resized.astype("float32") / 255.0
     return np.expand_dims(normalized, axis=0)
+
 
 def predict(image_np):
     interpreter.set_tensor(input_details[0]['index'], image_np)
