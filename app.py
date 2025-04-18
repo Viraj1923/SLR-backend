@@ -1,97 +1,127 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import os
+import cv2
+import numpy as np
+import gdown
+import mediapipe as mp
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
-import numpy as np
-import cv2
-import base64
-import gdown
-import os
-from io import BytesIO
-from PIL import Image
-import mediapipe as mp
+from starlette.background import BackgroundTask
 
-# === CONFIGURATION ===
-MODEL_PATH = "model.tflite"
-DRIVE_FILE_ID = "1MuNjBliVKTLiDwux2MVdUrYsTyeSY596"  # Replace with your own file ID
-LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
-          'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
-          'U', 'V', 'W', 'X', 'Y']
+# Constants
+IMAGE_SIZE = 224
+MODEL_PATH = "sign_language_model.h5"  # Updated to the TFLite model path
+GDRIVE_FILE_ID = "1L0pN3R6ldTO_2h2XNZ4HVxE2YzZ2w_2u"  # 🔁 Replace with your file ID
+GDRIVE_URL = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
 
-# === DOWNLOAD MODEL FROM DRIVE ===
-def download_model():
-    if not os.path.exists(MODEL_PATH):
-        url = f"https://drive.google.com/uc?id={DRIVE_FILE_ID}"
-        gdown.download(url, MODEL_PATH, quiet=False)
-        print("✅ Model downloaded from Google Drive.")
+# Download model if not present
+if not os.path.exists(MODEL_PATH):
+    print("[INFO] Downloading model from Google Drive...")
+    gdown.download(GDRIVE_URL, MODEL_PATH, quiet=False)
 
-# === INITIALIZE ===
-download_model()
+# Load gesture labels
+gesture_classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'Hello', 'I', 'I Love You',
+                   'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'Thank You',
+                   'U', 'V', 'W', 'X', 'Y']
+label_dict = {idx: name for idx, name in enumerate(gesture_classes)}
+
+# Load TFLite model
+print("[INFO] Loading TFLite model...")
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
 
+# MediaPipe setup
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=True)
+hands_detector = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.8)
+mp_drawing = mp.solutions.drawing_utils
 
+# FastAPI setup
 app = FastAPI()
 
-# === CORS SETUP ===
+# CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Or use ["http://localhost:3000"] for dev
+    allow_origins=["*"],  # Change to your frontend URL in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# === REQUEST SCHEMA ===
-class ImageData(BaseModel):
-    image: str  # base64 encoded image
+# Camera capture
+cap = cv2.VideoCapture(0)
+detected_label = "No Detection"
 
-# === HELPER FUNCTIONS ===
-def preprocess_image(base64_str):
-    if base64_str.startswith("data:image"):
-        base64_str = base64_str.split(",")[1]
+# Preprocess input for TFLite model
+def preprocess_image(image):
+    image = cv2.resize(image, (IMAGE_SIZE, IMAGE_SIZE))
+    image = image.astype("float32") / 255.0
+    return np.expand_dims(image, axis=0)
 
-    image_data = base64.b64decode(base64_str)
-    image = Image.open(BytesIO(image_data)).convert("RGB")
-    img_np = np.array(image)
+def generate_frames():
+    global detected_label
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
 
-    results = hands.process(cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
-    if results.multi_hand_landmarks:
-        h, w, _ = img_np.shape
-        hand = results.multi_hand_landmarks[0]
-        x_coords = [lm.x * w for lm in hand.landmark]
-        y_coords = [lm.y * h for lm in hand.landmark]
-        x1, y1 = int(max(min(x_coords) - 20, 0)), int(max(min(y_coords) - 20, 0))
-        x2, y2 = int(min(max(x_coords) + 20, w)), int(min(max(y_coords) + 20, h))
-        img_np = img_np[y1:y2, x1:x2]
-    else:
-        return None  # No hand detected
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands_detector.process(rgb)
 
-    resized = cv2.resize(img_np, (224, 224))  # change to (96, 96) if needed
-    normalized = resized.astype("float32") / 255.0
-    return np.expand_dims(normalized, axis=0)
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-def predict(image_np):
-    interpreter.set_tensor(input_details[0]['index'], image_np)
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-    pred_index = np.argmax(output_data)
-    return LABELS[pred_index]
+                h, w, _ = frame.shape
+                x_min, y_min, x_max, y_max = w, h, 0, 0
 
-# === PREDICT ENDPOINT ===
-@app.post("/predict")
-async def predict_letter(data: ImageData):
-    try:
-        image_np = preprocess_image(data.image)
-        if image_np is None:
-            return {"prediction": None, "message": "No hand detected in the image."}
+                for lm in hand_landmarks.landmark:
+                    x, y = int(lm.x * w), int(lm.y * h)
+                    x_min, y_min = min(x_min, x), min(y_min, y)
+                    x_max, y_max = max(x_max, x), max(y_max, y)
 
-        letter = predict(image_np)
-        return {"prediction": letter, "message": "Prediction successful."}
+                padding = 20
+                x_min, y_min = max(0, x_min - padding), max(0, y_min - padding)
+                x_max, y_max = min(w, x_max + padding), min(h, y_max + padding)
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+                hand_img = frame[y_min:y_max, x_min:x_max]
+                if hand_img.size == 0:
+                    continue
+
+                hand_img = preprocess_image(hand_img)
+
+                # Set input tensor
+                input_details = interpreter.get_input_details()
+                interpreter.set_tensor(input_details[0]['index'], hand_img)
+
+                # Run inference
+                interpreter.invoke()
+
+                # Get output tensor
+                output_details = interpreter.get_output_details()
+                predictions = interpreter.get_tensor(output_details[0]['index'])
+
+                predicted_index = np.argmax(predictions)
+                detected_label = label_dict.get(predicted_index, "Unknown")
+
+                cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+                cv2.putText(frame, detected_label, (x_min, y_min - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        _, jpeg = cv2.imencode('.jpg', frame)
+        frame_bytes = jpeg.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n\r\n')
+
+@app.get("/")
+def home():
+          return "Backend is running successfully!"
+          
+@app.get("/video_feed")
+def video_feed():
+    return StreamingResponse(generate_frames(), media_type='multipart/x-mixed-replace; boundary=frame')
+
+@app.get("/get_label")
+def get_label():
+    return JSONResponse({"label": detected_label})
