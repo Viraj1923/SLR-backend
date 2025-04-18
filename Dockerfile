@@ -18,5 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Expose default port (optional; useful for local testing)
 EXPOSE 8080
 
-# 🔧 Start the app using Railway's dynamic port
-CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:$PORT"]
+ENTRYPOINT ["sh", "-c"]
+CMD ["gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8080}"]
+
