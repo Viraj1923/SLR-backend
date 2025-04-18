@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 from starlette.background import BackgroundTask
+import uvicorn  # Add this import
 
 # Constants
 IMAGE_SIZE = 224
@@ -125,3 +126,8 @@ def video_feed():
 @app.get("/get_label")
 def get_label():
     return JSONResponse({"label": detected_label})
+
+# Add this section at the end of your code
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))  # Fallback to port 8000 if $PORT is not set
+    uvicorn.run(app, host="0.0.0.0", port=port)
